@@ -1,0 +1,7 @@
+interface:
+  display_name: "AI 精灵图智能分割"
+  short_description: "处理单张或整套 AI 精灵图，核对蒙版并导出动画资源"
+  brand_color: "#FF6B35"
+  default_prompt: "Use $ai-sprite-workflow to process this sprite sheet or animation folder and report anything that still needs review."
+policy:
+  allow_implicit_invocation: true

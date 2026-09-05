@@ -1,0 +1,46 @@
+# Python / local runtime
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Downloaded AI models and local caches
+.models/
+.cache/
+.tmp/
+*.onnx
+
+# User-provided and generated assets
+input/
+output/
+review/
+*.workflow-state.json
+
+# Local workspace state, history and credentials
+workspace/
+!workspace/.gitkeep
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+Desktop.ini
+
+# IDE / OS metadata
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.*

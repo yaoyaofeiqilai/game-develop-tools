@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sprite Intelligence Workbench</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23111719'/%3E%3Cpath d='M7 23h4V13H7zm7 0h4V7h-4zm7 0h4V10h-4z' fill='%23ff6b35'/%3E%3C/svg%3E">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("sprite-ui-theme")||"literary"}catch(_){document.documentElement.dataset.theme="literary"}</script>
+  <link rel="stylesheet" href="/static/app.css?v=20260904-1">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div>
+          <div class="brand-kicker">LOCAL ASSET SYSTEM / 01</div>
+          <div class="brand-title">SPRITE <em>INTELLIGENCE</em> WORKBENCH</div>
+        </div>
+      </div>
+      <div class="system-cluster">
+        <span class="system-pill" id="enginePill"><i></i> 引擎连接中</span>
+        <span class="system-pill muted" id="gpuPill">GPU —</span>
+        <button class="icon-button" id="refreshButton" title="刷新资源">↻</button>
+        <button class="icon-button" id="settingsButton" title="系统设置">⌁</button>
+      </div>
+    </header>
+
+    <aside class="source-panel panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">ASSET LIBRARY</span>
+          <h2>素材库</h2>
+        </div>
+        <div class="library-heading-actions"><button type="button" id="manageLibraryButton">管理</button><span class="count-badge" id="sourceCount">0</span></div>
+      </div>
+      <div class="segment-tabs" id="sourceTabs">
+        <button class="active" data-filter="输入队列">素材</button>
+        <button data-filter="ai">AI处理记录</button>
+        <button data-filter="jobs">处理历史</button>
+      </div>
+      <div class="drop-zone" id="dropZone" role="group" aria-label="导入图片或动画文件夹">
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/bmp" multiple hidden>
+        <span class="drop-icon">＋</span>
+        <span class="drop-copy"><strong>导入角色动画</strong><small>图片或文件夹，拖入后自动识别</small></span>
+        <span class="smart-import">
+          <button type="button" class="smart-import-button" id="smartImportButton"><span>导入素材</span><small>单张直接打开 · 多张自动成组</small><i>＋</i></button>
+        </span>
+      </div>
+      <div class="collection-bar hidden" id="collectionBar">
+        <div class="collection-head">
+          <span>ANIMATION SET</span>
+          <strong id="collectionName">—</strong>
+          <small id="collectionMeta">0 张图片</small>
+        </div>
+      </div>
+      <div class="library-manage-bar hidden" id="libraryManageBar">
+        <button type="button" id="selectVisibleAssets">全选当前</button>
+        <span id="manageSelectionCount">已选 0 项</span>
+        <button type="button" class="trash-action" id="trashSelectedButton" disabled>移入回收站</button>
+      </div>
+      <div class="source-list" id="sourceList"></div>
+    </aside>
+
+    <div class="pane-resizer left-resizer" id="leftResizer" role="separator" aria-orientation="vertical" aria-label="调整素材队列宽度" tabindex="0"><span></span></div>
+
+    <main class="workspace-panel panel" id="workspacePanel">
+      <div class="workspace-toolbar">
+        <div>
+          <span class="eyebrow">ACTIVE DOCUMENT</span>
+          <h1 id="documentTitle">选择一张图片开始</h1>
+          <p id="documentMeta">支持不规则排列、分离特效与尺寸变化</p>
+        </div>
+        <div class="view-tabs" id="viewTabs">
+          <button class="active" data-view="source">原图</button>
+          <button data-view="initial_cutout" disabled>初抠</button>
+          <button data-view="cutout" disabled>精修</button>
+          <button data-view="foreground_mask" disabled>蒙版</button>
+          <button data-view="overlay" disabled>实例归属</button>
+        </div>
+      </div>
+
+      <div class="canvas-stage" id="canvasStage">
+        <div class="canvas-import-overlay" id="canvasImportOverlay" aria-hidden="true">
+          <div><i>＋</i><strong>松开即可导入</strong><span>自动识别单张图片、多张图片或整个文件夹</span></div>
+        </div>
+        <button type="button" class="canvas-nav canvas-nav-previous hidden" id="canvasPreviousSource" aria-label="上一张图片" title="上一张（方向键 ←）"><i>←</i><span>上一张</span><small id="previousSourceName"></small></button>
+        <button type="button" class="canvas-nav canvas-nav-next hidden" id="canvasNextSource" aria-label="下一张图片" title="下一张（方向键 →）"><i>→</i><span>下一张</span><small id="nextSourceName"></small></button>
+        <div class="empty-stage" id="emptyStage">
+          <div class="radar-ring"><span></span></div>
+          <h3>等待素材</h3>
+          <p>点击左侧“导入素材”，或把图片和文件夹直接拖到这里</p>
+        </div>
+        <div class="image-viewport hidden" id="imageViewport">
+          <img id="mainImage" alt="当前精灵图" draggable="false">
+          <canvas id="componentCanvas" hidden></canvas>
+          <canvas id="lassoCanvas" class="lasso-canvas" hidden aria-label="局部圈选处理画布"></canvas>
+          <div class="selection-readout hidden" id="selectionReadout"></div>
+        </div>
+        <div class="busy-layer hidden" id="busyLayer">
+          <div class="scan-frame"><i></i></div>
+          <strong id="busyTitle">正在分析整张图片</strong>
+          <span id="busyDetail">抠图 → 连通实例 → 帧锚点 → 特效归属</span>
+        </div>
+      </div>
+
+      <div class="workspace-footer">
+        <span id="cursorHint">选择“实例归属”后可点击彩色碎片纠正归属</span>
+        <div class="zoom-controls">
+          <button id="zoomOut">−</button><span id="zoomValue">100%</span><button id="zoomIn">＋</button>
+          <button id="zoomFit">适配</button>
+        </div>
+      </div>
+    </main>
+
+    <div class="pane-resizer right-resizer" id="rightResizer" role="separator" aria-orientation="vertical" aria-label="调整处理面板宽度" tabindex="0"><span></span></div>
+
+    <aside class="inspector-panel panel">
+      <div class="inspector-scroll">
+      <div class="panel-heading inspector-heading">
+        <div><span class="eyebrow">PROCESS CONTROL</span><h2>智能分割</h2></div>
+        <span class="mode-chip">LOCAL</span>
+      </div>
+
+      <section class="control-section">
+        <div class="section-label"><span>01</span> 布局提示 <i>均可留空</i></div>
+        <div class="field-grid three">
+          <label><span>预期帧数</span><input id="expectedFrames" type="number" min="0" value="0" placeholder="自动"></label>
+          <label><span>行</span><input id="rows" type="number" min="0" value="0" placeholder="自动"></label>
+          <label><span>列</span><input id="columns" type="number" min="0" value="0" placeholder="自动"></label>
+        </div>
+        <p class="field-help">生成工作流若知道帧数，传入它会比纯视觉推断更稳定。</p>
+      </section>
+
+      <section class="control-section">
+        <div class="section-label"><span>02</span> 分割策略</div>
+        <label class="select-field"><span>背景处理</span><select id="backgroundMode"><option value="auto">自动判断</option><option value="rembg">AI 抠图</option><option value="chroma">连通色背景</option></select></label>
+        <label class="select-field"><span>模型</span><select id="backgroundModel"><option value="isnet-anime">ISNet Anime / 插画</option><option value="birefnet-general">BiRefNet / 通用</option><option value="u2net">U²-Net / 兼容</option></select></label>
+        <div class="range-field">
+          <div><span>组件灵敏度</span><output id="sensitivityValue">50</output></div>
+          <input id="sensitivity" type="range" min="5" max="100" value="50">
+        </div>
+        <div class="range-field">
+          <div><span>自动归属置信线</span><output id="confidenceValue">42</output></div>
+          <input id="confidence" type="range" min="0" max="100" value="42">
+        </div>
+      </section>
+
+      <section class="control-section refine-section">
+        <div class="section-label"><span>03</span> 蒙版精修 <i>处理孔洞与白边</i></div>
+        <label class="select-field"><span>自动精修强度</span><select id="refineMode"><option value="off">关闭</option><option value="conservative" selected>保守</option><option value="balanced">标准</option><option value="strong">强力</option></select></label>
+        <div class="range-field">
+          <div><span>背景颜色容差</span><output id="refineToleranceValue">18</output></div>
+          <input id="refineTolerance" type="range" min="3" max="40" value="18">
+        </div>
+        <div class="range-field">
+          <div><span>边缘羽化宽度</span><output id="matteWidthValue">3</output></div>
+          <input id="matteWidth" type="range" min="0" max="8" value="3">
+        </div>
+        <button class="refine-action" id="refineButton" disabled><span>重新精修当前蒙版</span><i>不重跑分割模型</i></button>
+        <div class="refine-stats hidden" id="refineStats"></div>
+        <div class="mask-tools" id="maskTools">
+          <span>点选修正</span>
+          <div>
+            <button type="button" class="mask-tool" data-tool="background" disabled>− 清除背景</button>
+            <button type="button" class="mask-tool" data-tool="foreground" disabled>＋ 恢复前景</button>
+          </div>
+          <small>适合单个颜色连通区域；选择后在“精修”图中点击。</small>
+          <div class="region-restore">
+            <div class="region-tool-grid">
+              <button type="button" class="lasso-tool" id="lassoTool" data-tool="restore-region" disabled><span>⌁ 圈选恢复</span><i>保护误删</i></button>
+              <button type="button" class="lasso-tool local-refine-tool" id="localRefineTool" data-tool="refine-region" disabled><span>◌ 圈选精修</span><i>重抠背景</i></button>
+            </div>
+            <label class="local-refine-options hidden" id="localRefineOptions">
+              <span>局部精修程度</span>
+              <select id="localRefineStrength">
+                <option value="gentle">轻度 · 优先保护边缘</option>
+                <option value="standard" selected>标准 · 推荐</option>
+                <option value="strong">强力 · 扩大背景证据</option>
+                <option value="maximum">极强 · 识别浅色残留</option>
+              </select>
+            </label>
+            <div class="lasso-actions hidden" id="lassoActions">
+              <button type="button" id="cancelLasso">重新圈选</button>
+              <button type="button" id="applyLasso" disabled>应用恢复</button>
+            </div>
+            <small id="regionToolHint">“恢复”取回初抠结果；“精修”只清除圈内同时符合颜色、平坦度与语义背景证据的像素，圈外不会改变。</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="result-section hidden" id="resultSection">
+        <div class="result-head">
+          <div><span class="eyebrow">DETECTION RESULT</span><strong id="resultCount">0 FRAMES</strong></div>
+          <span class="result-status" id="resultStatus">待检查</span>
+        </div>
+        <div class="metric-strip">
+          <div><span>帧</span><b id="metricFrames">0</b></div>
+          <div><span>组件</span><b id="metricComponents">0</b></div>
+          <div><span>待核对</span><b id="metricReview">0</b></div>
+          <div><span>耗时</span><b id="metricTime">0s</b></div>
+        </div>
+        <div class="frame-legend" id="frameLegend"></div>
+
+        <div class="review-card" id="reviewCard">
+          <div class="review-title"><span>人工核对队列</span><b id="reviewBadge">0</b></div>
+          <p id="reviewPrompt">红色边缘表示归属置信度较低，不一定是错误。</p>
+          <div class="review-list" id="reviewList"></div>
+        </div>
+
+        <div class="assignment-card hidden" id="assignmentCard">
+          <div><span>已选组件</span><b id="selectedComponent">#—</b></div>
+          <p id="assignmentPrompt">将这个身体部件、武器或特效归入：</p>
+          <div class="assignment-buttons" id="assignmentButtons"></div>
+        </div>
+
+        <button class="export-action" id="exportButton"><span>选择路径并导出</span><i>→</i></button>
+        <div class="export-result hidden" id="exportResult"></div>
+      </section>
+      </div>
+
+      <div class="primary-action-wrap" id="workflowActionDock">
+        <button class="primary-action" id="analyzeButton" disabled><span><b>运行智能分析</b><small>抠图 · 精修 · 智能分帧</small></span><i>⌘ ENTER</i></button>
+        <div class="group-action-dock hidden" id="groupControlSection">
+          <div class="group-dock-head">
+            <div><span>ANIMATION SET</span><strong id="groupControlName">—</strong></div>
+            <div><i id="groupControlStatus">当前整组</i><small id="groupControlMeta">0 张图片</small></div>
+          </div>
+          <div class="collection-actions">
+            <button type="button" class="batch-start" id="batchAnalyzeButton"><span>整组分析</span><i id="batchAnalyzeMeta">处理全部素材</i></button>
+            <button type="button" class="batch-export" id="batchExportButton" disabled><span>导出整组</span><i id="batchExportMeta">需先完成分析</i></button>
+          </div>
+          <div class="group-export-result hidden" id="groupExportResult"></div>
+          <div class="batch-progress hidden" id="batchProgress">
+            <div><span id="batchProgressText">准备处理</span><b id="batchProgressValue">0 / 0</b></div>
+            <progress id="batchProgressBar" value="0" max="1"></progress>
+            <button type="button" id="stopBatchButton">完成当前后停止</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <dialog id="folderImportDialog" class="workflow-dialog">
+    <form method="dialog" class="settings-sheet import-sheet" id="folderImportForm">
+      <div class="modal-head"><div><span class="eyebrow">ANIMATION SET IMPORT</span><h2>导入整套动画</h2></div><button value="cancel" class="close-button">×</button></div>
+      <div class="import-summary">
+        <div><span>有效图片</span><b id="importImageCount">0</b></div>
+        <div><span>子目录</span><b id="importFolderCount">0</b></div>
+        <div><span>总大小</span><b id="importTotalSize">0 KB</b></div>
+        <div><span>已跳过</span><b id="importSkippedCount">0</b></div>
+      </div>
+      <label class="import-name">动画组名称<input id="importCollectionName" maxlength="80" autocomplete="off"><small>将保存到 input/动画组名称，并在导出时保留相同分组。</small></label>
+      <div class="import-preview" id="importPreview"></div>
+      <div class="import-progress hidden" id="importProgress"><div><span id="importProgressText">正在导入</span><b id="importProgressValue">0 / 0</b></div><progress id="importProgressBar" value="0" max="1"></progress></div>
+      <div class="modal-actions"><button type="button" class="secondary-button" id="cancelFolderImport">取消</button><button type="button" class="primary-button" id="confirmFolderImport">导入并打开第一张</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="batchDialog" class="workflow-dialog">
+    <form method="dialog" class="settings-sheet batch-sheet">
+      <div class="modal-head"><div><span class="eyebrow">BATCH ANALYSIS</span><h2>整组智能分析</h2></div><button value="cancel" class="close-button">×</button></div>
+      <p class="settings-intro" id="batchDialogIntro">当前处理参数会应用到动画组中的每一张图片。</p>
+      <div class="batch-plan" id="batchPlan"></div>
+      <label class="check-option"><input type="checkbox" id="skipExistingJobs" checked><span><b>跳过已有分析任务</b><small>避免重复运行抠图模型；仍可在“任务”中重新分析单张。</small></span></label>
+      <label class="check-option"><input type="checkbox" id="exportReadyJobs"><span><b>自动导出无需核对的结果</b><small>存在待核对组件的图片不会自动导出。</small></span></label>
+      <div class="modal-actions"><button value="cancel" class="secondary-button">取消</button><button type="button" class="primary-button" id="confirmBatchAnalysis">开始整组分析</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="groupExportDialog" class="workflow-dialog group-export-dialog">
+    <form method="dialog" class="settings-sheet">
+      <div class="modal-head"><div><span class="eyebrow">ANIMATION SET EXPORT</span><h2>一键导出整组动画</h2></div><button value="cancel" class="close-button" aria-label="关闭">×</button></div>
+      <p class="settings-intro" id="groupExportIntro">将使用每张素材最近一次分析和局部修正结果批量导出。</p>
+      <div class="batch-plan group-export-plan" id="groupExportPlan"></div>
+      <div class="export-options-card">
+        <div class="export-option-title"><span>OUTPUT DELIVERY</span><strong>输出位置与内容</strong></div>
+        <label class="export-path-field"><span>导出到</span><div><input id="groupExportPath" placeholder="留空则使用项目 output 目录" autocomplete="off"><button type="button" id="groupExportBrowse">选择文件夹…</button></div><small>会记住最后一次路径；整组会按素材相对目录存放，避免同名帧覆盖。</small></label>
+        <label class="export-kind-field"><span>导出内容</span><select id="groupExportArtifact"><option value="aligned">统一尺寸帧（默认）</option><option value="trimmed">紧凑透明帧</option><option value="sheet">Sprite Sheet</option><option value="masks">透明蒙版</option><option value="all">完整处理包</option></select></label>
+        <label class="ai-tag-option"><input type="checkbox" id="groupExportAiTag"><span><b>标记为 AI 处理</b><small>导出记录会进入左侧“AI处理记录”，便于集中审核。</small></span></label>
+      </div>
+      <label class="check-option hidden" id="includeReviewRow"><input type="checkbox" id="includeReviewJobs"><span><b>同时导出仍待核对的素材</b><small>未完成组件归属核对的结果也会导出，并在 manifest 中保留未解决项。</small></span></label>
+      <p class="group-export-note" id="groupExportNote">未分析的图片不会被自动重跑，请先完成整组分析。</p>
+      <div class="modal-actions"><button value="cancel" class="secondary-button">取消</button><button type="button" class="primary-button" id="confirmGroupExport">开始整组导出</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="singleExportDialog" class="workflow-dialog export-dialog">
+    <form method="dialog" class="settings-sheet">
+      <div class="modal-head"><div><span class="eyebrow">ASSET DELIVERY</span><h2>导出当前素材</h2></div><button value="cancel" class="close-button" aria-label="关闭">×</button></div>
+      <p class="settings-intro" id="singleExportIntro">默认只交付适合动画制作的统一尺寸透明帧。</p>
+      <div class="export-options-card">
+        <div class="export-option-title"><span>OUTPUT DELIVERY</span><strong>输出位置与内容</strong></div>
+        <label class="export-path-field"><span>导出到</span><div><input id="singleExportPath" placeholder="留空则使用项目 output 目录" autocomplete="off"><button type="button" id="singleExportBrowse">选择文件夹…</button></div><small>自定义路径会直接收到所选素材，不需要再次复制。</small></label>
+        <label class="export-kind-field"><span>导出内容</span><select id="singleExportArtifact"><option value="aligned">统一尺寸帧（默认）</option><option value="trimmed">紧凑透明帧</option><option value="sheet">Sprite Sheet</option><option value="masks">透明蒙版</option><option value="all">完整处理包</option></select></label>
+        <label class="ai-tag-option"><input type="checkbox" id="singleExportAiTag"><span><b>标记为 AI 处理</b><small>加入左侧“AI处理记录”，后续可以快速审核或继续精修。</small></span></label>
+      </div>
+      <div class="modal-actions"><button value="cancel" class="secondary-button">取消</button><button type="button" class="primary-button" id="confirmSingleExport">开始导出</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="trashDialog" class="workflow-dialog trash-dialog">
+    <form method="dialog" class="settings-sheet">
+      <div class="modal-head"><div><span class="eyebrow">LIBRARY MANAGER</span><h2>移入项目回收站</h2></div><button class="close-button" value="cancel" aria-label="关闭">×</button></div>
+      <p class="settings-intro" id="trashDialogIntro">所选内容将从素材库移除，但仍可在项目回收站中找回。</p>
+      <div class="trash-summary" id="trashSummary"></div>
+      <label class="check-row"><input type="checkbox" id="trashRelatedJobs" checked><span>同时移除这些素材对应的处理历史</span></label>
+      <p class="trash-note">已导出的成品不会被删除。回收内容保存在 workspace/trash。</p>
+      <div class="modal-actions"><button class="secondary-button" value="cancel">取消</button><button type="button" class="danger-button" id="confirmTrash">移入回收站</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="settings-sheet" id="settingsForm">
+      <div class="modal-head"><div><span class="eyebrow">SYSTEM SETTINGS</span><h2>连接与扩展</h2></div><button value="cancel" class="close-button">×</button></div>
+      <p class="settings-intro">核心流程完全本地运行。代理仅用于下载新模型；视觉大模型接口是预留的可选增强层。</p>
+      <div class="settings-group theme-settings">
+        <strong>界面风格 <small>实时预览</small></strong>
+        <div class="theme-picker" id="themePicker">
+          <label class="theme-option industrial-option">
+            <input type="radio" name="uiTheme" value="industrial">
+            <span class="theme-swatch"><i></i><i></i><i></i></span>
+            <span><b>工业工作台</b><small>精密 · 暗色 · 高效率</small></span>
+          </label>
+          <label class="theme-option dopamine-option">
+            <input type="radio" name="uiTheme" value="dopamine">
+            <span class="theme-swatch"><i></i><i></i><i></i></span>
+            <span><b>多巴胺乐园</b><small>大胆 · 糖果色 · 玩心</small></span>
+          </label>
+          <label class="theme-option literary-option">
+            <input type="radio" name="uiTheme" value="literary">
+            <span class="theme-swatch"><i></i><i></i><i></i></span>
+            <span><b>文艺纸刊</b><small>纸张 · 墨色 · 编辑感</small></span>
+          </label>
+        </div>
+      </div>
+      <div class="settings-group"><strong>网络代理</strong><label>HTTP Proxy<input id="httpProxy" placeholder="http://127.0.0.1:7897"></label><label>HTTPS Proxy<input id="httpsProxy" placeholder="http://127.0.0.1:7897"></label></div>
+      <div class="settings-group"><strong>OpenAI 兼容视觉接口（可选）</strong><label>Base URL<input id="visionBase" autocomplete="url" placeholder="https://.../v1"></label><label>Model<input id="visionModel" autocomplete="off" placeholder="vision-model-name"></label><label>API Key<input id="visionKey" type="password" autocomplete="new-password" placeholder="留空则保留原值"></label></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-button">取消</button><button type="button" class="primary-button" id="saveSettings">保存设置</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast-stack" id="toastStack"></div>
+  <script src="/static/app.js?v=20260904-1"></script>
+</body>
+</html>
