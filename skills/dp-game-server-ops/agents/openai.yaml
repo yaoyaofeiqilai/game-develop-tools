@@ -1,0 +1,7 @@
+interface:
+  display_name: "DP Game Server Ops"
+  short_description: "Safely deploy and maintain the DP Game Skynet server"
+  default_prompt: "Use $dp-game-server-ops to inspect and safely maintain the deployed DP Game server."
+
+policy:
+  allow_implicit_invocation: true

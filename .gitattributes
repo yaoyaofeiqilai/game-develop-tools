@@ -1,0 +1,27 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Keep source and documentation consistent across Windows and GitHub.
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+
+# Windows launchers are intended to be double-clickable.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binary regression fixtures and generated-document assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.bmp binary
+*.onnx binary
+*.ort binary

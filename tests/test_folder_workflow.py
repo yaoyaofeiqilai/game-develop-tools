@@ -96,6 +96,27 @@ class FolderWorkflowTests(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_job_history_summary_recovers_animation_collection_from_source_path(self) -> None:
+        root = PROJECT_ROOT / "tests" / "_runtime" / uuid.uuid4().hex
+        input_root = root / "input"
+        source = input_root / "hero-walk" / "nested" / "frame_002.png"
+        try:
+            source.parent.mkdir(parents=True)
+            Image.new("RGBA", (8, 8), (255, 0, 0, 255)).save(source)
+            with patch("gui_server.INPUT_ROOT", input_root):
+                summary = _public_job_summary({
+                    "id": "legacy-folder-job",
+                    "source_path": str(source),
+                    "source_name": source.name,
+                })
+            self.assertEqual(summary["collection"], "hero-walk")
+            self.assertEqual(
+                summary["relative_name"],
+                "hero-walk/nested/frame_002.png",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_export_profile_is_bound_to_source_not_last_global_choice(self) -> None:
         root = PROJECT_ROOT / "tests" / "_runtime" / uuid.uuid4().hex
         profile_path = root / "workspace" / "export-profiles.json"

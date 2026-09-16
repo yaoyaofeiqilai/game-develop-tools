@@ -69,6 +69,8 @@ class AnalyzeRequest(BaseModel):
     refine_mode: Literal["off", "conservative", "balanced", "strong"] = "conservative"
     refine_tolerance: float = Field(18.0, ge=3.0, le=60.0)
     matte_width: int = Field(3, ge=0, le=12)
+    smart_chroma_enabled: bool = True
+    smart_chroma_strength: Literal["conservative", "standard", "strong"] = "standard"
 
 
 class AssignmentRequest(BaseModel):
@@ -80,6 +82,8 @@ class RefineRequest(BaseModel):
     mode: Literal["off", "conservative", "balanced", "strong"] = "balanced"
     tolerance: float = Field(18.0, ge=3.0, le=60.0)
     matte_width: int = Field(3, ge=0, le=12)
+    smart_chroma_enabled: bool | None = None
+    smart_chroma_strength: Literal["conservative", "standard", "strong"] | None = None
 
 
 class MaskPointRequest(BaseModel):
@@ -101,6 +105,8 @@ class LocalRefineRegionRequest(BaseModel):
     tolerance: float = Field(18.0, ge=3.0, le=60.0)
     matte_width: int = Field(3, ge=0, le=12)
     feather: int = Field(4, ge=0, le=24)
+    smart_chroma_enabled: bool | None = None
+    smart_chroma_strength: Literal["conservative", "standard", "strong"] | None = None
 
 
 class SettingsRequest(BaseModel):
@@ -743,11 +749,30 @@ def _to_config(request: AnalyzeRequest) -> SmartConfig:
         refine_mode=request.refine_mode,
         refine_tolerance=request.refine_tolerance,
         matte_width=request.matte_width,
+        smart_chroma_enabled=request.smart_chroma_enabled,
+        smart_chroma_strength=request.smart_chroma_strength,
     )
+
+
+def _source_library_metadata(source_path: str | Path) -> dict[str, str]:
+    """Derive animation-set metadata for both new and legacy jobs."""
+    metadata = {"collection": "", "relative_name": ""}
+    try:
+        source = Path(source_path).expanduser()
+        if not source.is_absolute():
+            source = PROJECT_ROOT / source
+        relative = source.resolve().relative_to(INPUT_ROOT.resolve())
+    except (OSError, ValueError):
+        return metadata
+    metadata["relative_name"] = relative.as_posix()
+    if len(relative.parts) > 1:
+        metadata["collection"] = relative.parts[0]
+    return metadata
 
 
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     result = dict(job)
+    result.update(_source_library_metadata(job.get("source_path", "")))
     result["files"] = {
         key: f"/api/jobs/{job['id']}/file/{key}?v={Path(value).stat().st_mtime_ns if Path(value).exists() else 0}"
         for key, value in job["files"].items()
@@ -896,6 +921,7 @@ def jobs() -> dict[str, Any]:
 def _public_job_summary(job: dict[str, Any]) -> dict[str, Any]:
     """Add browser-safe preview URLs to the lightweight history record."""
     result = dict(job)
+    result.update(_source_library_metadata(job.get("source_path", "")))
     job_id = str(job.get("id") or "")
     cutout = (JOBS_ROOT / job_id / "cutout.png").resolve()
     if job_id and _within(cutout, JOBS_ROOT) and cutout.is_file():
@@ -1029,6 +1055,8 @@ async def refine(job_id: str, request: RefineRequest) -> dict[str, Any]:
             request.mode,
             request.tolerance,
             request.matte_width,
+            request.smart_chroma_enabled,
+            request.smart_chroma_strength,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1080,6 +1108,8 @@ async def refine_region(job_id: str, request: LocalRefineRegionRequest) -> dict[
             request.tolerance,
             request.matte_width,
             request.feather,
+            request.smart_chroma_enabled,
+            request.smart_chroma_strength,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -1,0 +1,45 @@
+{
+  "_comment": "美术生成模型注册表:逻辑分级 → 通道/模型 的映射。更换或新增模型只改本文件,不改代码。2026-08-22 起:web(绿叶AI网站)为主力通道,API 通道降为备用。",
+  "tiers": {
+    "draft": {
+      "channel": "web",
+      "model": "2.5Flare渠道1(绿叶AI)",
+      "line": "2.5Flare渠道1",
+      "res": null,
+      "cost_cny": 0,
+      "use_for": "普通资产:场景小物件、普通小怪、道具、实验图",
+      "notes": "默认。2.5积分/张,自动/1K;需 Edge 完全退出;支持参考图。2026-09-13 站点线路改名:原 Image2低价一 → 2.5Flare渠道1"
+    },
+    "premium": {
+      "channel": "web",
+      "model": "Image4K-高-特价(绿叶AI)",
+      "line": "Image4K-高-特价",
+      "res": "2K",
+      "ratio": "16:9",
+      "cost_cny": 0,
+      "use_for": "重要资产:主角团、Boss、重要场景、参考图一致性衍生、动画精灵表(含多个子图像的图)",
+      "notes": "10积分/张,GPT2.5·4K 分组(2026-09-13 站点改名:原 Image2稳定线路十七 → Image4K-高-特价),支持2K/4K,默认2K;精灵表务必 16:9 宽幅(1:1 会裁掉帧);需4K时 --res 4K;参考图一致性走此分级"
+    },
+    "ui": {
+      "channel": "jimeng",
+      "model": "jimeng_t2i_v40",
+      "cost_cny": 0.2,
+      "use_for": "UI 图标、按钮、装饰元素(免费试用额度内 0 元)",
+      "notes": "即梦 4.0,限 1 并发,禁并行;暂不支持本地参考图"
+    },
+    "backup_lite": {
+      "channel": "plan",
+      "model": "doubao-seedream-5-0-lite",
+      "cost_cny": 0,
+      "use_for": "备用:网站通道失效时的普通资产(Agent Plan 套餐额度)",
+      "notes": "API 备用通道,稳定性最高"
+    },
+    "backup_pro": {
+      "channel": "standard",
+      "model": "doubao-seedream-5-0-pro-260628",
+      "cost_cny": 1.8,
+      "use_for": "备用:网站通道失效时的重要资产(参考图一致性、图层拆分)",
+      "notes": "约 1.8 元/张,仅在网站不可用且资产重要时使用"
+    }
+  }
+}

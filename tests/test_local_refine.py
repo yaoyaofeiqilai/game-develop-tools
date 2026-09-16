@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-import tempfile
+import shutil
 import unittest
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 
@@ -22,8 +23,11 @@ class _SyntheticRemover:
 
 class LocalRefineTests(unittest.TestCase):
     def test_semantic_mask_uses_the_same_padded_crop_as_the_source(self) -> None:
-        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "workspace") as temporary:
-            jobs_root = Path(temporary)
+        runtime_root = PROJECT_ROOT / "tests" / "_runtime"
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        jobs_root = runtime_root / uuid.uuid4().hex
+        jobs_root.mkdir()
+        try:
             job_id = "local-refine-regression"
             job_dir = jobs_root / job_id
             job_dir.mkdir()
@@ -77,11 +81,17 @@ class LocalRefineTests(unittest.TestCase):
                 18.0,
                 3,
                 4,
+                False,
+                "conservative",
                 jobs_root=jobs_root,
             )
 
             self.assertEqual(result["refinement"]["last_local_refine_strength"], "standard")
+            self.assertFalse(result["config"]["smart_chroma_enabled"])
+            self.assertEqual(result["config"]["smart_chroma_strength"], "conservative")
             self.assertTrue(Path(result["files"]["cutout"]).exists())
+        finally:
+            shutil.rmtree(jobs_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

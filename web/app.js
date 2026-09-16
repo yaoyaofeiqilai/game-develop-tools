@@ -17,6 +17,7 @@ function formatSize(bytes) { return bytes > 1048576 ? `${(bytes / 1048576).toFix
 
 async function boot() {
   bindEvents();
+  syncSmartChromaControl();
   restorePaneLayout();
   restoreCollapsedLibraryGroups();
   try {
@@ -77,7 +78,13 @@ function allLibraryItems(){
   return state.sources.filter(source=>source.group==="输入队列");
 }
 function itemOperationTime(item){const epoch=Number(item.modified_at_epoch);if(Number.isFinite(epoch)&&epoch>0)return epoch;const parsed=Date.parse(String(item.modified_at||item.created_at||"").replace(" ","T"));return Number.isFinite(parsed)?parsed/1000:0;}
-function libraryGroupFor(item){if(item.isAi)return{key:"jobs:ai",label:"AI 处理记录",kind:"history"};if(item.isJob)return{key:"jobs:history",label:"处理历史",kind:"history"};if(item.collection)return{key:`sources:collection:${item.collection}`,label:`动画组 · ${item.collection}`,kind:"collection"};return{key:"sources:queue",label:"输入队列",kind:"queue"};}
+function libraryGroupFor(item){
+  if(item.isJob&&item.collection){const scope=item.isAi?"ai":"history";return{key:`jobs:${scope}:collection:${item.collection}`,label:`动画组 · ${item.collection}`,kind:"collection"};}
+  if(item.isAi)return{key:"jobs:ai:single",label:"单张 AI 记录",kind:"history"};
+  if(item.isJob)return{key:"jobs:history:single",label:"单张处理记录",kind:"history"};
+  if(item.collection)return{key:`sources:collection:${item.collection}`,label:`动画组 · ${item.collection}`,kind:"collection"};
+  return{key:"sources:queue",label:"输入队列",kind:"queue"};
+}
 function groupedLibraryItems(){
   const groups=new Map();
   allLibraryItems().forEach(item=>{const descriptor=libraryGroupFor(item);if(!groups.has(descriptor.key))groups.set(descriptor.key,{...descriptor,items:[],latest:0});const group=groups.get(descriptor.key);group.items.push(item);group.latest=Math.max(group.latest,itemOperationTime(item));});
@@ -181,7 +188,9 @@ async function loadJob(jobId) {
   catch(error){ toast(error.message,true); } finally { hideBusy(); }
 }
 
-function analyzeBody(source){return{ source_path:source.path, expected_frames:+$("expectedFrames").value||0, rows:+$("rows").value||0, columns:+$("columns").value||0, background_mode:$("backgroundMode").value, background_model:$("backgroundModel").value, component_sensitivity:+$("sensitivity").value/100, confidence_threshold:+$("confidence").value/100, refine_mode:$("refineMode").value, refine_tolerance:+$("refineTolerance").value, matte_width:+$("matteWidth").value };}
+function smartChromaOptions(){return{smart_chroma_enabled:$("smartChromaEnabled").checked,smart_chroma_strength:$("smartChromaStrength").value};}
+function syncSmartChromaControl(){const enabled=$("smartChromaEnabled").checked;$("smartChromaControl").classList.toggle("active",enabled);$("smartChromaStrength").disabled=!enabled;$("smartChromaStrengthField").classList.toggle("disabled",!enabled);}
+function analyzeBody(source){return{ source_path:source.path, expected_frames:+$("expectedFrames").value||0, rows:+$("rows").value||0, columns:+$("columns").value||0, background_mode:$("backgroundMode").value, background_model:$("backgroundModel").value, component_sensitivity:+$("sensitivity").value/100, confidence_threshold:+$("confidence").value/100, refine_mode:$("refineMode").value, refine_tolerance:+$("refineTolerance").value, matte_width:+$("matteWidth").value, ...smartChromaOptions() };}
 
 async function analyze() {
   if (!state.selectedSource) return;
@@ -198,7 +207,7 @@ function displayJob() {
   $("documentTitle").textContent=job.source_name; $("documentMeta").textContent=`${job.source_size[0]} × ${job.source_size[1]} px · ${job.engine.name}`;
   $("emptyStage").classList.add("hidden"); $("imageViewport").classList.remove("hidden"); $("analyzeButton").disabled=false;
   $("refineButton").disabled=false; document.querySelectorAll(".mask-tool,.lasso-tool").forEach(button=>button.disabled=false);
-  if(job.config){$("refineMode").value=job.config.refine_mode||"conservative";$("refineTolerance").value=job.config.refine_tolerance??18;$("matteWidth").value=job.config.matte_width??3;updateRangeOutputs();}
+  if(job.config){$("refineMode").value=job.config.refine_mode||"conservative";$("refineTolerance").value=job.config.refine_tolerance??18;$("matteWidth").value=job.config.matte_width??3;$("smartChromaEnabled").checked=job.config.smart_chroma_enabled??true;$("smartChromaStrength").value=job.config.smart_chroma_strength||"standard";syncSmartChromaControl();updateRangeOutputs();}
   enableResultTabs(true); renderResult(); loadComponentMap(); setView("overlay"); renderSources(); updateCollectionBar();
 }
 function enableResultTabs(enabled){ document.querySelectorAll('#viewTabs button:not([data-view="source"])').forEach(b=>b.disabled=!enabled||!state.job?.files?.[b.dataset.view]); }
@@ -221,7 +230,8 @@ function renderRefinement(){
   panel.classList.remove("hidden");
   const semantic=data.semantic_assist?"语义保护已启用":"单蒙版判断";
   const strengthLabels={gentle:"轻度",standard:"标准",strong:"强力",maximum:"极强"};
-  panel.innerHTML=`<b>精修报告</b><span>清除 ${data.removed_pixels||0} px</span><span>封闭背景 ${data.enclosed_regions_removed||0} 处</span><span>${semantic}</span>${data.manual_edit_count?`<span>手动修正 ${data.manual_edit_count} 次</span>`:""}${data.last_region_restored_pixels!==undefined?`<span>最近圈选恢复 ${data.last_region_restored_pixels} px</span>`:""}${data.last_region_refined_pixels!==undefined?`<span>最近局部精修 ${data.last_region_refined_pixels} px</span><span>彻底清除 ${data.last_region_removed_pixels||0} px · ${strengthLabels[data.last_local_refine_strength]||data.last_local_refine_strength}</span>${data.last_region_protected_pixels!==undefined?`<span>前景保护 ${data.last_region_protected_pixels} px</span>`:""}`:""}`;
+  const chroma=data.adaptive_chroma,chromaLabel=!chroma?.enabled?"智能绿幕已关闭":chroma?.detected?`${chroma.kind==="blue"?"蓝幕":"绿幕"}净化 ${strengthLabels[chroma.strength]||chroma.strength}`:"未检测到绿/蓝幕";
+  panel.innerHTML=`<b>精修报告</b><span>清除 ${data.removed_pixels||0} px</span><span>封闭背景 ${data.enclosed_regions_removed||0} 处</span><span>${semantic}</span><span>${chromaLabel}</span>${chroma?.applied?`<span>绿幕清除 ${chroma.removed_pixels||0} px</span><span>消绿边 ${chroma.despilled_pixels||0} px</span><span>绿幕孔洞 ${chroma.enclosed_regions_removed||0} 处</span>`:""}${data.manual_edit_count?`<span>手动修正 ${data.manual_edit_count} 次</span>`:""}${data.last_region_restored_pixels!==undefined?`<span>最近圈选恢复 ${data.last_region_restored_pixels} px</span>`:""}${data.last_region_refined_pixels!==undefined?`<span>最近局部精修 ${data.last_region_refined_pixels} px</span><span>彻底清除 ${data.last_region_removed_pixels||0} px · ${strengthLabels[data.last_local_refine_strength]||data.last_local_refine_strength}</span>${data.last_local_chroma_removed_pixels?`<span>圈选绿幕清除 ${data.last_local_chroma_removed_pixels} px</span>`:""}${data.last_region_protected_pixels!==undefined?`<span>前景保护 ${data.last_region_protected_pixels} px</span>`:""}`:""}`;
 }
 function renderAssignment(){
   const card=$("assignmentCard"); if(!state.selectedComponent||!state.job){card.classList.add("hidden");return;} card.classList.remove("hidden");
@@ -255,8 +265,8 @@ async function canvasPick(event){
 }
 
 async function refineCurrent(){
-  if(!state.job)return; $("refineButton").disabled=true; showBusy("正在精修蒙版", "检测封闭背景 → 羽化边缘 → 净化白边");
-  const body={mode:$("refineMode").value,tolerance:+$("refineTolerance").value,matte_width:+$("matteWidth").value};
+  if(!state.job)return; $("refineButton").disabled=true; showBusy("正在精修蒙版", "检测绿幕孔洞 → 羽化边缘 → 抑制绿溢与白边");
+  const body={mode:$("refineMode").value,tolerance:+$("refineTolerance").value,matte_width:+$("matteWidth").value,...smartChromaOptions()};
   try{state.job=await api(`/api/jobs/${state.job.id}/refine`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});enableResultTabs(true);renderResult();await loadComponentMap();setView("cutout");toast(`精修完成：清除 ${state.job.refinement.removed_pixels||0} 个背景像素`);}
   catch(error){toast(error.message,true);}finally{hideBusy();$("refineButton").disabled=false;}
 }
@@ -269,7 +279,7 @@ function toggleMaskTool(tool){
   $("lassoActions").classList.toggle("hidden",!regionTool);$("localRefineOptions").classList.toggle("hidden",state.maskTool!=="refine-region");$("applyLasso").disabled=true;
   document.querySelector(".region-restore").classList.toggle("refine-mode",state.maskTool==="refine-region");
   $("applyLasso").textContent=state.maskTool==="refine-region"?"应用局部精修":"应用恢复";
-  if(state.maskTool){setView("cutout");$("cursorHint").textContent=state.maskTool==="background"?"点击残留背景：仅清除与点击位置颜色相近的连通区域":state.maskTool==="foreground"?"点击误删区域：恢复与点击位置颜色相近的连通区域":state.maskTool==="refine-region"?"按住鼠标圈住残留背景；圈内会重新执行原背景扣除":"按住鼠标圈住误删部分；圈内将恢复为初抠结果";}
+  if(state.maskTool){setView("cutout");$("cursorHint").textContent=state.maskTool==="background"?"点击残留背景：仅清除与点击位置颜色相近的连通区域":state.maskTool==="foreground"?"点击误删区域：恢复与点击位置颜色相近的连通区域":state.maskTool==="refine-region"?"按住鼠标圈住残留背景；检测到绿幕时会优先清除孔洞和绿溢":"按住鼠标圈住误删部分；圈内将恢复为初抠结果";}
   else{$("lassoCanvas").hidden=true;$("imageViewport").classList.remove("mask-edit-mode","pick-mode");$("cursorHint").textContent="选择“实例归属”可纠正组件；选择点选或圈选工具可精修蒙版";}
   syncLassoCanvas();
 }
@@ -299,11 +309,11 @@ function drawLasso(){
 function beginLasso(event){if(!["restore-region","refine-region"].includes(state.maskTool))return;event.preventDefault();const canvas=$("lassoCanvas");canvas.setPointerCapture(event.pointerId);state.lassoPoints=[lassoPoint(event)];state.lassoDrawing=true;$("applyLasso").disabled=true;drawLasso();}
 function moveLasso(event){if(!state.lassoDrawing)return;event.preventDefault();const point=lassoPoint(event),last=state.lassoPoints.at(-1);if(Math.hypot(point[0]-last[0],point[1]-last[1])>=3){state.lassoPoints.push(point);drawLasso();}}
 function endLasso(event){if(!state.lassoDrawing)return;event.preventDefault();state.lassoDrawing=false;if(state.lassoPoints.length>=3){drawLasso();$("applyLasso").disabled=false;$("cursorHint").textContent=state.maskTool==="refine-region"?"圈选完成：选择精修程度后应用，或重新圈选":"圈选完成：确认范围后应用恢复，或重新圈选";}else{clearLasso();}}
-function clearLasso(){state.lassoPoints=[];state.lassoDrawing=false;$("applyLasso").disabled=true;drawLasso();$("cursorHint").textContent=state.maskTool==="refine-region"?"按住鼠标圈住残留背景；圈内会重新执行原背景扣除":"按住鼠标圈住误删部分；圈内将恢复为初抠结果";}
+function clearLasso(){state.lassoPoints=[];state.lassoDrawing=false;$("applyLasso").disabled=true;drawLasso();$("cursorHint").textContent=state.maskTool==="refine-region"?"按住鼠标圈住残留背景；绿幕净化与背景扣除只写回圈内":"按住鼠标圈住误删部分；圈内将恢复为初抠结果";}
 async function applyRegionEdit(){
-  if(!state.job||state.lassoPoints.length<3)return;const points=state.lassoPoints.map(point=>[Math.round(point[0]),Math.round(point[1])]),refining=state.maskTool==="refine-region";showBusy(refining?"正在局部重新抠图":"正在恢复圈选区域",refining?"裁取原图上下文 → 原背景扣除 → 局部强度精修 → 圈内融合":"读取初抠蒙版 → 局部羽化融合 → 更新实例归属");$("applyLasso").disabled=true;
-  const endpoint=refining?"refine-region":"mask-region",body=refining?{points,strength:$("localRefineStrength").value,tolerance:+$("refineTolerance").value,matte_width:+$("matteWidth").value,feather:Math.max(2,+$("matteWidth").value+1)}:{points,feather:Math.max(2,+$("matteWidth").value+1)};
-  try{state.job=await api(`/api/jobs/${state.job.id}/${endpoint}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});renderResult();await loadComponentMap();setView("cutout");const tool=refining?"refine-region":"restore-region";state.maskTool=tool;document.querySelector(`.lasso-tool[data-tool="${tool}"]`)?.classList.add("active");$("lassoActions").classList.remove("hidden");$("localRefineOptions").classList.toggle("hidden",!refining);document.querySelector(".region-restore").classList.toggle("refine-mode",refining);clearLasso();if(refining){const refined=state.job.refinement?.last_region_refined_pixels??0,removed=state.job.refinement?.last_region_removed_pixels??0,protectedPixels=state.job.refinement?.last_region_protected_pixels??0;toast(`局部精修完成：清理 ${refined} px，保护前景 ${protectedPixels} px`);}else{const restored=state.job.refinement?.last_region_restored_pixels??0;toast(`圈选区域已从初抠图恢复 ${restored} 个像素`);}}
+  if(!state.job||state.lassoPoints.length<3)return;const points=state.lassoPoints.map(point=>[Math.round(point[0]),Math.round(point[1])]),refining=state.maskTool==="refine-region";showBusy(refining?"正在局部重新抠图":"正在恢复圈选区域",refining?"整图绿幕取样 → 圈内孔洞净化 → 原背景扣除 → 局部融合":"读取初抠蒙版 → 局部羽化融合 → 更新实例归属");$("applyLasso").disabled=true;
+  const endpoint=refining?"refine-region":"mask-region",body=refining?{points,strength:$("localRefineStrength").value,tolerance:+$("refineTolerance").value,matte_width:+$("matteWidth").value,feather:Math.max(2,+$("matteWidth").value+1),...smartChromaOptions()}:{points,feather:Math.max(2,+$("matteWidth").value+1)};
+  try{state.job=await api(`/api/jobs/${state.job.id}/${endpoint}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});renderResult();await loadComponentMap();setView("cutout");const tool=refining?"refine-region":"restore-region";state.maskTool=tool;document.querySelector(`.lasso-tool[data-tool="${tool}"]`)?.classList.add("active");$("lassoActions").classList.remove("hidden");$("localRefineOptions").classList.toggle("hidden",!refining);document.querySelector(".region-restore").classList.toggle("refine-mode",refining);clearLasso();if(refining){const refined=state.job.refinement?.last_region_refined_pixels??0,chromaRemoved=state.job.refinement?.last_local_chroma_removed_pixels??0,protectedPixels=state.job.refinement?.last_region_protected_pixels??0;toast(`局部精修完成：常规清理 ${refined} px，绿幕清理 ${chromaRemoved} px，保护前景 ${protectedPixels} px`);}else{const restored=state.job.refinement?.last_region_restored_pixels??0;toast(`圈选区域已从初抠图恢复 ${restored} 个像素`);}}
   catch(error){toast(error.message,true);$("applyLasso").disabled=false;}finally{hideBusy();}
 }
 
@@ -381,7 +391,7 @@ function bindImportDropTarget(target){
 function openBatchDialog(){
   const name=activeCollection(),sources=collectionSources(name);if(!name||sources.length<2)return;const processed=sources.filter(jobForSource).length,expected=+$("expectedFrames").value||0;
   $("batchDialogIntro").textContent=`“${name}”中的图片将按当前右侧参数逐张处理。处理期间可以要求在完成当前图片后停止。`;
-  $("batchPlan").innerHTML=`共 <b>${sources.length}</b> 张图片 · 已有任务 <b>${processed}</b> 张<br>帧数提示：<b>${expected||"自动判断"}</b> · 背景：<b>${$("backgroundMode").selectedOptions[0].textContent}</b> · 精修：<b>${$("refineMode").selectedOptions[0].textContent}</b>`;
+  $("batchPlan").innerHTML=`共 <b>${sources.length}</b> 张图片 · 已有任务 <b>${processed}</b> 张<br>帧数提示：<b>${expected||"自动判断"}</b> · 背景：<b>${$("backgroundMode").selectedOptions[0].textContent}</b> · 绿幕：<b>${$("smartChromaEnabled").checked?$("smartChromaStrength").selectedOptions[0].textContent:"关闭"}</b> · 精修：<b>${$("refineMode").selectedOptions[0].textContent}</b>`;
   $("batchDialog").showModal();
 }
 
@@ -478,6 +488,7 @@ function bindEvents(){
   $("manageLibraryButton").onclick=toggleManageMode;$("selectVisibleAssets").onclick=toggleSelectVisible;$("trashSelectedButton").onclick=openTrashDialog;$("confirmTrash").onclick=confirmTrashSelection;
   $("viewTabs").onclick=e=>{if(e.target.dataset.view&&!e.target.disabled)setView(e.target.dataset.view);}; $("mainImage").onclick=canvasPick;
   ["sensitivity","confidence","refineTolerance","matteWidth"].forEach(id=>$(id).oninput=updateRangeOutputs);
+  $("smartChromaEnabled").onchange=syncSmartChromaControl;
   document.querySelectorAll(".mask-tool").forEach(button=>button.onclick=()=>toggleMaskTool(button.dataset.tool));
   $("lassoTool").onclick=()=>toggleMaskTool("restore-region");$("localRefineTool").onclick=()=>toggleMaskTool("refine-region");$("cancelLasso").onclick=clearLasso;$("applyLasso").onclick=applyRegionEdit;
   $("lassoCanvas").addEventListener("pointerdown",beginLasso);$("lassoCanvas").addEventListener("pointermove",moveLasso);$("lassoCanvas").addEventListener("pointerup",endLasso);$("lassoCanvas").addEventListener("pointercancel",endLasso);

@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy this file to artgen.local.json and fill in only the providers you use. Never commit the local file.",
+  "ark_plan_api_key": "",
+  "ark_api_key": "",
+  "jimeng_access_key": "",
+  "jimeng_secret_key": ""
+}

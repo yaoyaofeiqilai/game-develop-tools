@@ -6,12 +6,26 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+tests/_runtime/
+
+# Python packaging / build output
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
 
 # Downloaded AI models and local caches
 .models/
 .cache/
 .tmp/
 *.onnx
+*.ort
 
 # User-provided and generated assets
 input/
@@ -21,15 +35,25 @@ review/
 
 # Local workspace state, history and credentials
 workspace/
-!workspace/.gitkeep
 
 # Logs and temporary files
 *.log
 *.tmp
 *.bak
 *.swp
+*.pid
+*.lock
 Thumbs.db
 Desktop.ini
+
+# Browser / frontend tooling
+node_modules/
+playwright-report/
+test-results/
+blob-report/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
 
 # IDE / OS metadata
 .vscode/

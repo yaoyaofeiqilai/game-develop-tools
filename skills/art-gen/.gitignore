@@ -1,0 +1,3 @@
+scripts/artgen.local.json
+__pycache__/
+*.pyc

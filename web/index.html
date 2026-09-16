@@ -135,6 +135,17 @@
       <section class="control-section">
         <div class="section-label"><span>02</span> 分割策略</div>
         <label class="select-field"><span>背景处理</span><select id="backgroundMode"><option value="auto">自动判断</option><option value="rembg">AI 抠图</option><option value="chroma">连通色背景</option></select></label>
+        <div class="chroma-control active" id="smartChromaControl">
+          <div class="chroma-control-head">
+            <div><strong>智能绿幕净化 <em>默认开启</em></strong><small>清除封闭绿幕、蓝幕孔洞，并抑制边缘染色</small></div>
+            <label class="toggle-switch" title="关闭后完全使用原有抠图流程">
+              <input id="smartChromaEnabled" type="checkbox" checked>
+              <span aria-hidden="true"></span>
+            </label>
+          </div>
+          <label class="select-field chroma-strength-field" id="smartChromaStrengthField"><span>绿幕净化强度</span><select id="smartChromaStrength"><option value="conservative">保守 · 加强前景保护</option><option value="standard" selected>标准 · 推荐</option><option value="strong">强力 · 清理重度绿溢</option></select></label>
+          <p>只在检测到均匀高饱和绿幕或蓝幕时生效，普通背景不会改变。</p>
+        </div>
         <label class="select-field"><span>模型</span><select id="backgroundModel"><option value="isnet-anime">ISNet Anime / 插画</option><option value="birefnet-general">BiRefNet / 通用</option><option value="u2net">U²-Net / 兼容</option></select></label>
         <div class="range-field">
           <div><span>组件灵敏度</span><output id="sensitivityValue">50</output></div>
@@ -184,7 +195,7 @@
               <button type="button" id="cancelLasso">重新圈选</button>
               <button type="button" id="applyLasso" disabled>应用恢复</button>
             </div>
-            <small id="regionToolHint">“恢复”取回初抠结果；“精修”只清除圈内同时符合颜色、平坦度与语义背景证据的像素，圈外不会改变。</small>
+            <small id="regionToolHint">“恢复”取回初抠结果；“精修”会优先使用整图绿幕模型清除圈内孔洞与绿溢，再结合颜色、平坦度和语义证据，圈外不会改变。</small>
           </div>
         </div>
       </section>

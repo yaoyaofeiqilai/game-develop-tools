@@ -147,6 +147,8 @@ class SmartConfig:
     refine_mode: str = "conservative"
     refine_tolerance: float = 18.0
     matte_width: int = 3
+    smart_chroma_enabled: bool = True
+    smart_chroma_strength: str = "standard"
 
 
 def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
@@ -172,6 +174,253 @@ def _srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
          200 * (transformed[..., 1] - transformed[..., 2])],
         axis=-1,
     )
+
+
+def _rgb_to_hsv_components(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return vectorised HSV values with hue in degrees and S/V in 0..1."""
+    value = rgb.astype(np.float32) / 255.0
+    maximum = np.max(value, axis=2)
+    minimum = np.min(value, axis=2)
+    delta = maximum - minimum
+    saturation = np.divide(
+        delta,
+        maximum,
+        out=np.zeros_like(delta),
+        where=maximum > 1e-6,
+    )
+    hue = np.zeros_like(maximum)
+    active = delta > 1e-6
+    red = active & (value[:, :, 0] == maximum)
+    green = active & (value[:, :, 1] == maximum)
+    blue = active & (value[:, :, 2] == maximum)
+    hue[red] = np.mod(
+        (value[:, :, 1][red] - value[:, :, 2][red]) / delta[red], 6.0
+    )
+    hue[green] = (
+        (value[:, :, 2][green] - value[:, :, 0][green]) / delta[green] + 2.0
+    )
+    hue[blue] = (
+        (value[:, :, 0][blue] - value[:, :, 1][blue]) / delta[blue] + 4.0
+    )
+    return hue * 60.0, saturation, maximum
+
+
+def _detect_chroma_screen(source: Image.Image) -> dict[str, Any] | None:
+    """Detect a deliberately saturated, uniform green or blue screen."""
+    border = border_pixels(source)
+    background_rgb = np.median(border, axis=0).astype(np.float32)
+    border_std = np.std(border, axis=0)
+    hue, saturation, value = _rgb_to_hsv_components(
+        background_rgb.reshape(1, 1, 3)
+    )
+    key_channel = int(np.argmax(background_rgb))
+    other_channels = [index for index in range(3) if index != key_channel]
+    dominance = float(
+        background_rgb[key_channel] - np.max(background_rgb[other_channels])
+    )
+    # Red/orange backdrops collide too often with skin and effects. The adaptive
+    # key is intentionally limited to the production-standard green/blue cases.
+    if (
+        key_channel not in {1, 2}
+        or float(saturation[0, 0]) < 0.45
+        or float(value[0, 0]) < 0.28
+        or dominance < 45.0
+        or float(np.max(border_std)) > 14.0
+    ):
+        return None
+    return {
+        "kind": "green" if key_channel == 1 else "blue",
+        "key_channel": key_channel,
+        "background_rgb": background_rgb,
+        "hue": float(hue[0, 0]),
+        "saturation": float(saturation[0, 0]),
+        "dominance": dominance,
+        "border_std": border_std,
+    }
+
+
+def _adaptive_chroma_cleanup(
+    source: Image.Image,
+    current: Image.Image,
+    enabled: bool = True,
+    strength: str = "standard",
+    semantic_alpha: np.ndarray | None = None,
+    region: np.ndarray | None = None,
+) -> tuple[Image.Image, dict[str, Any]]:
+    """Remove enclosed chroma-screen pockets and de-spill surviving edges.
+
+    Strong, flat key-colour cores may override the semantic model because a
+    foreground model commonly fills holes surrounded by a character. Weaker
+    candidates still need exterior connectivity, low detail, or semantic
+    background support.
+    """
+    profile = _detect_chroma_screen(source)
+    metrics: dict[str, Any] = {
+        "enabled": bool(enabled),
+        "detected": profile is not None,
+        "applied": False,
+        "strength": strength,
+        "kind": profile["kind"] if profile else "none",
+        "removed_pixels": 0,
+        "softened_pixels": 0,
+        "despilled_pixels": 0,
+        "enclosed_regions_removed": 0,
+    }
+    if profile is None or not enabled:
+        return current.convert("RGBA"), metrics
+
+    settings = {
+        "conservative": (8.0, 18.0, 0.56, 0.30, 28.0, 12.0, 90, 2, 0.48),
+        "standard": (12.0, 28.0, 0.46, 0.22, 20.0, 16.0, 150, 3, 0.68),
+        "strong": (18.0, 40.0, 0.34, 0.15, 12.0, 22.0, 210, 4, 0.84),
+    }
+    selected_strength = strength if strength in settings else "standard"
+    (
+        hard_hue,
+        soft_hue,
+        hard_saturation,
+        soft_saturation,
+        hard_dominance,
+        soft_detail_limit,
+        semantic_limit,
+        soft_width,
+        despill_amount,
+    ) = settings[selected_strength]
+
+    source_rgb = np.asarray(source.convert("RGB"), dtype=np.uint8)
+    result = np.asarray(current.convert("RGBA"), dtype=np.uint8).copy()
+    current_alpha = result[:, :, 3].copy()
+    hue, saturation, _ = _rgb_to_hsv_components(source_rgb)
+    hue_distance = np.minimum(
+        np.abs(hue - profile["hue"]), 360.0 - np.abs(hue - profile["hue"])
+    )
+    key_channel = int(profile["key_channel"])
+    other_channels = [index for index in range(3) if index != key_channel]
+    dominance = source_rgb[:, :, key_channel].astype(np.float32) - np.max(
+        source_rgb[:, :, other_channels].astype(np.float32), axis=2
+    )
+
+    hard = (
+        (hue_distance <= hard_hue)
+        & (saturation >= hard_saturation)
+        & (dominance >= hard_dominance)
+    )
+    broad = (
+        (hue_distance <= soft_hue)
+        & (saturation >= soft_saturation)
+        & (dominance >= max(5.0, hard_dominance * 0.42))
+    )
+    selection = np.ones(hard.shape, dtype=bool) if region is None else np.asarray(region, dtype=bool)
+    if selection.shape != hard.shape:
+        raise ValueError("绿幕精修区域与源图尺寸不一致")
+
+    exterior_seed = np.zeros(broad.shape, dtype=bool)
+    exterior_seed[0, :] = broad[0, :]
+    exterior_seed[-1, :] = broad[-1, :]
+    exterior_seed[:, 0] = broad[:, 0]
+    exterior_seed[:, -1] = broad[:, -1]
+    exterior = ndimage.binary_propagation(exterior_seed, mask=broad)
+
+    smooth = ndimage.gaussian_filter(source_rgb.astype(np.float32), sigma=(1.05, 1.05, 0))
+    local_detail = np.linalg.norm(source_rgb.astype(np.float32) - smooth, axis=2)
+    flat = local_detail <= soft_detail_limit
+    if semantic_alpha is None:
+        semantic_background = np.zeros(hard.shape, dtype=bool)
+        semantic_values = None
+    else:
+        semantic_values = np.asarray(semantic_alpha, dtype=np.uint8)
+        if semantic_values.shape != hard.shape:
+            raise ValueError("语义蒙版与源图尺寸不一致")
+        semantic_background = semantic_values <= semantic_limit
+
+    enclosed_hard = hard & ~exterior
+    enclosed_labels, _ = ndimage.label(
+        enclosed_hard, structure=np.ones((3, 3), dtype=np.uint8)
+    )
+    accepted_enclosed = np.zeros(hard.shape, dtype=bool)
+    accepted_regions = 0
+    small_override_area = max(96, round(hard.size * 0.0015))
+    for region_id, slices in enumerate(ndimage.find_objects(enclosed_labels), start=1):
+        if slices is None:
+            continue
+        candidate = enclosed_labels[slices] == region_id
+        area = int(candidate.sum())
+        if area < 3:
+            continue
+        core = ndimage.binary_erosion(candidate, iterations=1)
+        sample = core if core.any() else candidate
+        local_semantic = semantic_values[slices] if semantic_values is not None else None
+        semantic_support = (
+            local_semantic is not None
+            and float(np.mean(local_semantic[sample])) <= semantic_limit
+        )
+        # Small regions that are already a strong hue/saturation match are the
+        # classic holes which border flood-fill cannot reach. Their edge detail
+        # comes from antialiasing against the surrounding character, so detail
+        # must not veto the high-confidence key itself.
+        small_key_core = area <= small_override_area
+        if semantic_support or small_key_core:
+            accepted_enclosed[slices] |= candidate
+            accepted_regions += 1
+
+    propagation_mask = broad & (flat | semantic_background | hard)
+    enclosed_growth = ndimage.binary_propagation(
+        accepted_enclosed, mask=propagation_mask
+    )
+    exterior_background = exterior & (flat | semantic_background | hard)
+    remove_core = (exterior_background | enclosed_growth) & selection
+
+    final_alpha = current_alpha.astype(np.float32)
+    final_alpha[remove_core] = 0.0
+    softened = np.zeros(hard.shape, dtype=bool)
+    if remove_core.any() and soft_width > 0:
+        distance_from_core = ndimage.distance_transform_edt(~remove_core)
+        softened = (
+            selection
+            & broad
+            & ~remove_core
+            & (distance_from_core <= soft_width)
+            & (flat | semantic_background | hard)
+        )
+        ramp = np.clip(distance_from_core / (soft_width + 0.35), 0.0, 1.0) * 255.0
+        final_alpha[softened] = np.minimum(final_alpha[softened], ramp[softened])
+    final_alpha_u8 = np.clip(final_alpha, 0, 255).astype(np.uint8)
+    result[:, :, 3] = final_alpha_u8
+
+    spill_radius = soft_width + 2
+    spill_zone = (
+        selection
+        & broad
+        & ~remove_core
+        & (final_alpha_u8 > 0)
+        & ndimage.binary_dilation(remove_core, iterations=spill_radius)
+    )
+    if spill_zone.any():
+        hue_score = np.clip(1.0 - hue_distance / max(soft_hue, 1.0), 0.0, 1.0)
+        alpha_factor = 0.35 + 0.65 * (1.0 - final_alpha_u8.astype(np.float32) / 255.0)
+        amount = np.clip(despill_amount * hue_score * alpha_factor, 0.0, 0.92)
+        neutral = np.max(result[:, :, other_channels].astype(np.float32), axis=2)
+        key_values = result[:, :, key_channel].astype(np.float32)
+        corrected = key_values * (1.0 - amount) + neutral * amount
+        result[:, :, key_channel][spill_zone] = np.clip(
+            corrected[spill_zone], 0, 255
+        ).astype(np.uint8)
+
+    metrics.update(
+        {
+            "applied": True,
+            "strength": selected_strength,
+            "background_rgb": [int(round(value)) for value in profile["background_rgb"]],
+            "border_std": [round(float(value), 2) for value in profile["border_std"]],
+            "removed_pixels": int(
+                np.count_nonzero((current_alpha >= 8) & (final_alpha_u8 < 8))
+            ),
+            "softened_pixels": int(softened.sum()),
+            "despilled_pixels": int(spill_zone.sum()),
+            "enclosed_regions_removed": accepted_regions,
+        }
+    )
+    return Image.fromarray(result, "RGBA"), metrics
 
 
 def _refine_cutout(
@@ -989,8 +1238,16 @@ class SmartEngine:
         initial_cutout = remover.remove(source)
         semantic_alpha = None
         semantic_remover = None
-        if (
-            config.refine_mode != "off"
+        if config.background_mode == "rembg":
+            semantic_alpha = np.asarray(initial_cutout.getchannel("A"), dtype=np.uint8)
+        elif (
+            (
+                config.refine_mode != "off"
+                or (
+                    config.smart_chroma_enabled
+                    and _detect_chroma_screen(source) is not None
+                )
+            )
             and config.background_mode in {"auto", "chroma"}
             and has_uniform_border(source)
         ):
@@ -1005,6 +1262,14 @@ class SmartEngine:
             config.matte_width,
             semantic_alpha,
         )
+        cutout, chroma_metrics = _adaptive_chroma_cleanup(
+            source,
+            cutout,
+            config.smart_chroma_enabled,
+            config.smart_chroma_strength,
+            semantic_alpha,
+        )
+        refinement["adaptive_chroma"] = chroma_metrics
         analysis = self._derive_layout(source, cutout, config)
 
         job_id = make_job_id(source_path)
@@ -1077,6 +1342,8 @@ class SmartEngine:
         mode: str,
         tolerance: float,
         matte_width: int,
+        smart_chroma_enabled: bool | None = None,
+        smart_chroma_strength: str | None = None,
         jobs_root: Path = JOBS_ROOT,
     ) -> dict[str, Any]:
         job_dir = jobs_root / job_id
@@ -1085,6 +1352,10 @@ class SmartEngine:
         config.refine_mode = mode
         config.refine_tolerance = tolerance
         config.matte_width = matte_width
+        if smart_chroma_enabled is not None:
+            config.smart_chroma_enabled = smart_chroma_enabled
+        if smart_chroma_strength is not None:
+            config.smart_chroma_strength = smart_chroma_strength
         source = Image.open(job["source_path"]).convert("RGBA")
         initial_cutout = self._ensure_initial_cutout(job, source, config, job_dir)
         semantic_path = job.get("files", {}).get("semantic_mask")
@@ -1094,6 +1365,14 @@ class SmartEngine:
         cutout, refinement = _refine_cutout(
             source, initial_cutout, mode, tolerance, matte_width, semantic_alpha
         )
+        cutout, chroma_metrics = _adaptive_chroma_cleanup(
+            source,
+            cutout,
+            config.smart_chroma_enabled,
+            config.smart_chroma_strength,
+            semantic_alpha,
+        )
+        refinement["adaptive_chroma"] = chroma_metrics
         job["refinement"] = refinement
         job["manual_edits"] = []
         return self._save_analysis_state(job, source, cutout, config, job_dir)
@@ -1148,6 +1427,8 @@ class SmartEngine:
         tolerance: float,
         matte_width: int,
         feather: int,
+        smart_chroma_enabled: bool | None = None,
+        smart_chroma_strength: str | None = None,
         jobs_root: Path = JOBS_ROOT,
     ) -> dict[str, Any]:
         """Re-run the configured background remover on a selected source crop."""
@@ -1156,9 +1437,13 @@ class SmartEngine:
         job_dir = jobs_root / job_id
         job = self.load_job(job_id, jobs_root)
         config = SmartConfig(**job.get("config", {}))
+        if smart_chroma_enabled is not None:
+            config.smart_chroma_enabled = smart_chroma_enabled
+        if smart_chroma_strength is not None:
+            config.smart_chroma_strength = smart_chroma_strength
         source = Image.open(job["source_path"]).convert("RGBA")
         current = Image.open(job["files"]["cutout"]).convert("RGBA")
-        _, _, bbox = _polygon_region(source.size, points)
+        region_mask, _, bbox = _polygon_region(source.size, points)
 
         # Give the original remover context around the lasso. The write-back is
         # still clipped to the exact polygon, so neighbouring frames are safe.
@@ -1216,6 +1501,23 @@ class SmartEngine:
             config.background_model,
             semantic_full,
         )
+        local_chroma_strength = {
+            "gentle": "conservative",
+            "standard": "standard",
+            "strong": "strong",
+            "maximum": "strong",
+        }[strength]
+        edited, chroma_metrics = _adaptive_chroma_cleanup(
+            source,
+            edited,
+            config.smart_chroma_enabled,
+            local_chroma_strength,
+            semantic_full,
+            region_mask,
+        )
+        record["adaptive_chroma"] = chroma_metrics
+        record["chroma_removed_pixels"] = chroma_metrics["removed_pixels"]
+        record["chroma_despilled_pixels"] = chroma_metrics["despilled_pixels"]
         job.setdefault("manual_edits", []).append(record)
         refinement = job.setdefault("refinement", {})
         refinement["manual_edit_count"] = len(job["manual_edits"])
@@ -1223,6 +1525,8 @@ class SmartEngine:
         refinement["last_region_removed_pixels"] = record["removed_pixels"]
         refinement["last_region_protected_pixels"] = record["protected_foreground_pixels"]
         refinement["last_local_refine_strength"] = strength
+        refinement["last_local_chroma_removed_pixels"] = chroma_metrics["removed_pixels"]
+        refinement["last_local_chroma_despilled_pixels"] = chroma_metrics["despilled_pixels"]
         return self._save_analysis_state(job, source, edited, config, job_dir)
 
     def _write_job(self, job_dir: Path, job: dict[str, Any]) -> None:

@@ -74,8 +74,18 @@ class SkillClientTests(unittest.TestCase):
         args = CLIENT.build_parser().parse_args(["process", "sheet.png", "--analyze-only"])
         payload = CLIENT.process_payload(args, Path("sheet.png"))
         self.assertTrue(payload["ai_tag"])
+        self.assertTrue(payload["smart_chroma_enabled"])
+        self.assertEqual(payload["smart_chroma_strength"], "standard")
         self.assertNotIn("artifacts", payload)
         self.assertNotIn("output_path", payload)
+
+    def test_process_can_explicitly_disable_smart_chroma(self) -> None:
+        args = CLIENT.build_parser().parse_args(
+            ["process", "sheet.png", "--no-smart-chroma", "--chroma-strength", "strong"]
+        )
+        payload = CLIENT.process_payload(args, Path("sheet.png"))
+        self.assertFalse(payload["smart_chroma_enabled"])
+        self.assertEqual(payload["smart_chroma_strength"], "strong")
 
     def test_process_payload_only_overrides_remembered_export_when_requested(self) -> None:
         root = self.runtime_root()

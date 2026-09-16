@@ -227,6 +227,17 @@ def add_processing_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--refine-mode", choices=("off", "conservative", "balanced", "strong"), default="conservative")
     command.add_argument("--refine-tolerance", type=float, default=18.0)
     command.add_argument("--matte-width", type=int, default=3)
+    command.add_argument(
+        "--smart-chroma",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Automatically clean saturated green/blue screens (enabled by default)",
+    )
+    command.add_argument(
+        "--chroma-strength",
+        choices=("conservative", "standard", "strong"),
+        default="standard",
+    )
     command.add_argument("--analyze-only", action="store_true")
     command.add_argument("--import-external", action="store_true")
     add_export_arguments(command)
@@ -282,6 +293,8 @@ def process_payload(
         "refine_mode": args.refine_mode,
         "refine_tolerance": max(3.0, min(60.0, args.refine_tolerance)),
         "matte_width": max(0, min(12, args.matte_width)),
+        "smart_chroma_enabled": args.smart_chroma,
+        "smart_chroma_strength": args.chroma_strength,
         "export": not args.analyze_only,
         "ai_tag": True,
     }
@@ -332,6 +345,17 @@ def build_parser() -> argparse.ArgumentParser:
     refine.add_argument("--mode", choices=("off", "conservative", "balanced", "strong"), default="balanced")
     refine.add_argument("--tolerance", type=float, default=18.0)
     refine.add_argument("--matte-width", type=int, default=3)
+    refine.add_argument(
+        "--smart-chroma",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable adaptive green/blue-screen cleanup for this job",
+    )
+    refine.add_argument(
+        "--chroma-strength",
+        choices=("conservative", "standard", "strong"),
+        default=None,
+    )
 
     mask_point = subparsers.add_parser("mask-point", help="Clear or restore one colour-connected mask region")
     mask_point.add_argument("job_id")
@@ -462,15 +486,20 @@ def main() -> int:
             )
             print_json(summarize_job(job, project_root))
         elif args.command == "refine":
+            refine_payload: dict[str, Any] = {
+                "mode": args.mode,
+                "tolerance": max(3.0, min(60.0, args.tolerance)),
+                "matte_width": max(0, min(12, args.matte_width)),
+            }
+            if args.smart_chroma is not None:
+                refine_payload["smart_chroma_enabled"] = args.smart_chroma
+            if args.chroma_strength is not None:
+                refine_payload["smart_chroma_strength"] = args.chroma_strength
             job = request_json(
                 args.base_url,
                 "POST",
                 f"/api/jobs/{args.job_id}/refine",
-                {
-                    "mode": args.mode,
-                    "tolerance": max(3.0, min(60.0, args.tolerance)),
-                    "matte_width": max(0, min(12, args.matte_width)),
-                },
+                refine_payload,
             )
             print_json(summarize_job(job, project_root))
         elif args.command == "mask-point":
