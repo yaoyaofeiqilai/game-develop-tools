@@ -8,6 +8,24 @@
 
 详细操作、参数选择、局部修复和故障排查请阅读：[中文使用手册](docs/USER_GUIDE.zh-CN.md)。
 
+## AI Skills
+
+仓库的 `skills/` 目录收录了可交给 Codex、Kimi Code 等 AI Agent 使用的工作流说明。每个 Skill 都以 `SKILL.md` 为入口，描述适用场景、操作步骤、工具调用方式、验收标准和常见问题。
+
+| Skill | 用途 | 适用场景 |
+| --- | --- | --- |
+| [`art-gen`](skills/art-gen/SKILL.md) | 游戏美术资产生成与修改 | 角色、怪物、场景、UI、特效、道具贴图和动画精灵表；包含生成通道路由、提示词规范、落盘规则与验收流程 |
+| [`char-anim`](skills/char-anim/SKILL.md) | 重要角色动画生产 | 主角、Boss 等角色的走路、奔跑、跳跃、攻击、受击和倒地动画；覆盖图生视频、抽帧、抠图、对齐与 Godot 验收 |
+| [`ai-sprite-workflow`](skills/ai-sprite-workflow/SKILL.md) | AI 精灵图后处理 | 对生成好的精灵表或动画帧执行背景移除、智能分帧、蒙版修复、锚点对齐、批量导出和历史清理，不负责生成原始美术 |
+| [`bgm-gen`](skills/bgm-gen/SKILL.md) | BGM 与歌曲生成 | 使用本地音乐模型生成纯音乐、主题曲或角色歌，并完成试听验收与资产归档 |
+| [`sfx-gen`](skills/sfx-gen/SKILL.md) | 游戏音效生成 | 生成打击、脚步、环境、技能和 UI 等音效，并按游戏资产要求验收、整理与归档 |
+| [`char-voice`](skills/char-voice/SKILL.md) | 角色台词配音 | 复用已经建档的角色音色批量生成台词语音，也包含新角色首次建立音色的流程 |
+| [`dp-game-server-ops`](skills/dp-game-server-ops/SKILL.md) | 游戏服务器部署与维护 | 服务器健康检查、版本化部署、日志诊断、systemd、MySQL、WebSocket 排障与回滚；实际连接参数通过本地配置提供 |
+
+使用时，把需要的 Skill 目录放入 Agent 支持的 skills 目录，或让 Agent 直接读取对应的 `SKILL.md`。首次运行前应先查看 Skill 中的环境要求和本地配置说明；仓库内只保留可复用流程及配置示例，不包含实际账号、密钥或服务器连接信息。
+
+这些 Skill 可以串联使用。例如，重要角色动画可以先由 `art-gen` 生成参考图，再由 `char-anim` 生成动作视频，最后交给 `ai-sprite-workflow` 完成抽帧后的透明背景处理、对齐和导出。
+
 ## 主要能力
 
 - **整图智能抠图**：在连通色背景与 `rembg` 语义模型之间自动选择，默认模型为 `isnet-anime`。
@@ -195,7 +213,8 @@ game-tool/
 ├── smart_engine.py               # 智能抠图、精修、实例归属和导出
 ├── sprite_workflow.py            # 基础 CLI 与文件夹监控流程
 ├── web/                           # 原生 HTML/CSS/JavaScript GUI
-├── skills/ai-sprite-workflow/    # Codex Skill 与自动化客户端
+├── skills/                       # AI 美术、音频、动画和服务器运维 Skills
+│   └── ai-sprite-workflow/       # 精灵图工作流及自动化客户端
 ├── tests/                         # 单元与回归测试
 ├── test/                          # 小型人工回归素材
 ├── start_gui.bat / .ps1          # GUI 启动入口
